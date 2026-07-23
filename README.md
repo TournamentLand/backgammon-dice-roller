@@ -1,5 +1,7 @@
 # backgammon-dice-roller
 
+English | [فارسی](README.fa.md)
+
 A provably-fair, HMAC-based dice roll formula for online backgammon.
 
 This is the actual code that generates and verifies dice rolls in production
