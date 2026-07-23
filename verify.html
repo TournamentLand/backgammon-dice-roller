@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Backgammon Dice Roller — Offline Verifier</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 760px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e5e5e5; background: #16181c; }
+    textarea, input { background: #24272e !important; color: #e5e5e5 !important; border-color: #444 !important; }
+    .card { background: #1e2127 !important; border-color: #333 !important; }
+    code, pre { background: #24272e !important; }
+  }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  p.lede { color: #666; }
+  .card {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    background: #fafafa;
+  }
+  label { display: block; font-weight: 600; margin-top: 0.75rem; font-size: 0.9rem; }
+  input, textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    padding: 0.5rem;
+    margin-top: 0.25rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+  }
+  textarea { min-height: 140px; resize: vertical; }
+  button {
+    margin-top: 1rem;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    border-radius: 8px;
+    border: none;
+    background: #2563eb;
+    color: white;
+    cursor: pointer;
+  }
+  button:hover { background: #1d4ed8; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #eee; }
+  .ok { color: #16803c; font-weight: 700; }
+  .fail { color: #c0392b; font-weight: 700; }
+  #verdict { font-size: 1.05rem; font-weight: 700; margin-top: 1rem; }
+  code { background: #f0f0f0; padding: 0.1rem 0.35rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Backgammon Dice Roller — Offline Verifier</h1>
+<p class="lede">
+  This page runs entirely in your browser. It makes no network requests —
+  open your browser's dev tools and check the Network tab if you want to
+  confirm that yourself. Save this file and open it from disk any time you
+  want to verify a match without trusting anything served by us live.
+</p>
+
+<div class="card">
+  <h2 style="margin-top:0">Verify a full match reveal</h2>
+  <p>
+    Paste the JSON reveal object shown by the "Verify Fairness" panel
+    (contains <code>serverSeed</code>, <code>clientSeedHost</code>,
+    <code>clientSeedGuest</code>, <code>commitmentHash</code>, and
+    <code>rollLog</code>).
+  </p>
+  <label for="revealInput">Reveal JSON</label>
+  <textarea id="revealInput" placeholder='{"serverSeed":"...","clientSeedHost":"...","clientSeedGuest":"...","commitmentHash":"...","rollLog":[{"nonce":0,"count":1,"values":[4]}, ...]}'></textarea>
+  <button id="verifyBtn">Verify</button>
+  <div id="verdict"></div>
+  <table id="resultsTable" style="display:none">
+    <thead><tr><th>Nonce</th><th>Expected</th><th>Actual (as played)</th><th>Result</th></tr></thead>
+    <tbody id="resultsBody"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Compute a single roll</h2>
+  <p>Useful for spot-checking one roll by hand instead of the whole match.</p>
+  <label for="serverSeed">serverSeed</label>
+  <input id="serverSeed" placeholder="revealed server seed">
+  <label for="clientSeedHost">clientSeedHost</label>
+  <input id="clientSeedHost" placeholder="host's client seed">
+  <label for="clientSeedGuest">clientSeedGuest</label>
+  <input id="clientSeedGuest" placeholder="guest's client seed">
+  <label for="nonce">nonce</label>
+  <input id="nonce" type="number" value="0">
+  <label for="count">count (1 for opening die, 2 for a turn roll)</label>
+  <input id="count" type="number" value="2">
+  <button id="computeBtn">Compute</button>
+  <div id="singleResult" style="margin-top:1rem"></div>
+</div>
+
+<p style="color:#888; font-size:0.85rem">
+  Source: <a href="https://github.com/">backgammon-dice-roller</a> — same
+  code that runs on the server and in the game client. A CLI version is also
+  available in <code>bin/verify.js</code> for a terminal instead of a browser.
+</p>
+
+<!-- ── Inlined dependency: plain-JS SHA-256 / HMAC-SHA256 (src/sha256.js) ── -->
+<script>
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.BPFSha256 = factory();
+  }
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  var H0 = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+
+  function rotr(x, n) {
+    return (x >>> n) | (x << (32 - n));
+  }
+
+  function sha256(bytes) {
+    var bitLen = bytes.length * 8;
+    var withOne = bytes.length + 1;
+    var padded = withOne % 64 <= 56 ? withOne + (56 - (withOne % 64)) : withOne + (120 - (withOne % 64));
+    var msg = new Uint8Array(padded + 8);
+    msg.set(bytes);
+    msg[bytes.length] = 0x80;
+    var hi = Math.floor(bitLen / 0x100000000);
+    var lo = bitLen >>> 0;
+    var view = new DataView(msg.buffer);
+    view.setUint32(msg.length - 8, hi, false);
+    view.setUint32(msg.length - 4, lo, false);
+
+    var h = H0.slice();
+    var w = new Array(64);
+
+    for (var chunk = 0; chunk < msg.length; chunk += 64) {
+      for (var i = 0; i < 16; i++) {
+        w[i] = view.getUint32(chunk + i * 4, false);
+      }
+      for (i = 16; i < 64; i++) {
+        var s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        var s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+
+      var a = h[0], b = h[1], c = h[2], d = h[3];
+      var e = h[4], f = h[5], g = h[6], hh = h[7];
+
+      for (i = 0; i < 64; i++) {
+        var S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        var ch = (e & f) ^ (~e & g);
+        var temp1 = (hh + S1 + ch + K[i] + w[i]) | 0;
+        var S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        var maj = (a & b) ^ (a & c) ^ (b & c);
+        var temp2 = (S0 + maj) | 0;
+
+        hh = g; g = f; f = e; e = (d + temp1) | 0;
+        d = c; c = b; b = a; a = (temp1 + temp2) | 0;
+      }
+
+      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+      h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+    }
+
+    var out = new Uint8Array(32);
+    var outView = new DataView(out.buffer);
+    for (i = 0; i < 8; i++) outView.setUint32(i * 4, h[i] >>> 0, false);
+    return out;
+  }
+
+  function hmacSha256(keyBytes, msgBytes) {
+    var blockSize = 64;
+    var key = keyBytes;
+    if (key.length > blockSize) key = sha256(key);
+    if (key.length < blockSize) {
+      var padded = new Uint8Array(blockSize);
+      padded.set(key);
+      key = padded;
+    }
+
+    var oKeyPad = new Uint8Array(blockSize);
+    var iKeyPad = new Uint8Array(blockSize);
+    for (var i = 0; i < blockSize; i++) {
+      oKeyPad[i] = key[i] ^ 0x5c;
+      iKeyPad[i] = key[i] ^ 0x36;
+    }
+
+    var inner = new Uint8Array(iKeyPad.length + msgBytes.length);
+    inner.set(iKeyPad);
+    inner.set(msgBytes, iKeyPad.length);
+    var innerHash = sha256(inner);
+
+    var outer = new Uint8Array(oKeyPad.length + innerHash.length);
+    outer.set(oKeyPad);
+    outer.set(innerHash, oKeyPad.length);
+    return sha256(outer);
+  }
+
+  function utf8ToBytes(str) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+    var bytes = [];
+    for (var i = 0; i < str.length; i++) {
+      var code = str.charCodeAt(i);
+      if (code < 0x80) {
+        bytes.push(code);
+      } else if (code < 0x800) {
+        bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+      } else {
+        bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+      }
+    }
+    return new Uint8Array(bytes);
+  }
+
+  function hexToBytes(hex) {
+    if (hex.length % 2 !== 0) throw new Error('Invalid hex string (odd length)');
+    var bytes = new Uint8Array(hex.length / 2);
+    for (var i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+    return bytes;
+  }
+
+  function bytesToHex(bytes) {
+    var hex = '';
+    for (var i = 0; i < bytes.length; i++) {
+      hex += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    }
+    return hex;
+  }
+
+  return {
+    sha256: sha256,
+    hmacSha256: hmacSha256,
+    utf8ToBytes: utf8ToBytes,
+    hexToBytes: hexToBytes,
+    bytesToHex: bytesToHex
+  };
+});
+</script>
+
+<!-- ── Inlined dependency: dice formula (src/index.js) ── -->
+<script>
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory(require('./sha256.js'));
+  } else {
+    root.BackgammonProvablyFair = factory(root.BPFSha256);
+  }
+})(typeof self !== 'undefined' ? self : this, function (sha) {
+  'use strict';
+
+  var REJECTION_CEILING = 252;
+
+  function sha256Hex(str) {
+    return sha.bytesToHex(sha.sha256(sha.utf8ToBytes(str)));
+  }
+
+  function hmacSha256Bytes(keyStr, msgStr) {
+    return sha.hmacSha256(sha.utf8ToBytes(keyStr), sha.utf8ToBytes(msgStr));
+  }
+
+  function commitmentHash(serverSeed) {
+    return sha256Hex(serverSeed);
+  }
+
+  function rollMessage(clientSeedHost, clientSeedGuest, nonce) {
+    return clientSeedHost + ':' + clientSeedGuest + ':' + nonce;
+  }
+
+  function deriveValues(params) {
+    var serverSeed = params.serverSeed;
+    var message = rollMessage(params.clientSeedHost, params.clientSeedGuest, params.nonce);
+    var count = params.count;
+
+    var values = [];
+    var extra = 0;
+    var digest = hmacSha256Bytes(serverSeed, message);
+    var cursor = 0;
+
+    while (values.length < count) {
+      if (cursor >= digest.length) {
+        extra += 1;
+        digest = hmacSha256Bytes(serverSeed, message + ':' + extra);
+        cursor = 0;
+      }
+      var byte = digest[cursor];
+      cursor += 1;
+      if (byte >= REJECTION_CEILING) continue;
+      values.push((byte % 6) + 1);
+    }
+
+    return values;
+  }
+
+  function verifyReveal(reveal) {
+    var commitmentValid = commitmentHash(reveal.serverSeed) === reveal.commitmentHash;
+
+    var rolls = (reveal.rollLog || []).map(function (entry) {
+      var expected = deriveValues({
+        serverSeed: reveal.serverSeed,
+        clientSeedHost: reveal.clientSeedHost,
+        clientSeedGuest: reveal.clientSeedGuest,
+        nonce: entry.nonce,
+        count: entry.count
+      });
+      var actual = entry.values;
+      var valid = expected.length === actual.length && expected.every(function (v, i) { return v === actual[i]; });
+      return { nonce: entry.nonce, count: entry.count, expected: expected, actual: actual, valid: valid };
+    });
+
+    var allValid = commitmentValid && rolls.every(function (r) { return r.valid; });
+
+    return { commitmentValid: commitmentValid, rolls: rolls, allValid: allValid };
+  }
+
+  return {
+    sha256Hex: sha256Hex,
+    commitmentHash: commitmentHash,
+    deriveValues: deriveValues,
+    verifyReveal: verifyReveal,
+    _internal: { rollMessage: rollMessage, hmacSha256Bytes: hmacSha256Bytes, REJECTION_CEILING: REJECTION_CEILING }
+  };
+});
+</script>
+
+<!-- ── Page wiring ── -->
+<script>
+(function () {
+  var dice = window.BackgammonProvablyFair;
+
+  document.getElementById('verifyBtn').addEventListener('click', function () {
+    var verdictEl = document.getElementById('verdict');
+    var table = document.getElementById('resultsTable');
+    var tbody = document.getElementById('resultsBody');
+    tbody.innerHTML = '';
+    table.style.display = 'none';
+
+    var reveal;
+    try {
+      reveal = JSON.parse(document.getElementById('revealInput').value);
+    } catch (e) {
+      verdictEl.innerHTML = '<span class="fail">Could not parse JSON: ' + e.message + '</span>';
+      return;
+    }
+
+    var result;
+    try {
+      result = dice.verifyReveal(reveal);
+    } catch (e) {
+      verdictEl.innerHTML = '<span class="fail">Verification error: ' + e.message + '</span>';
+      return;
+    }
+
+    result.rolls.forEach(function (roll) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + roll.nonce + '</td>' +
+        '<td>' + roll.expected.join(', ') + '</td>' +
+        '<td>' + roll.actual.join(', ') + '</td>' +
+        '<td class="' + (roll.valid ? 'ok' : 'fail') + '">' + (roll.valid ? 'MATCH' : 'MISMATCH') + '</td>';
+      tbody.appendChild(tr);
+    });
+    table.style.display = result.rolls.length ? 'table' : 'none';
+
+    if (result.allValid) {
+      verdictEl.innerHTML = '<span class="ok">✓ Commitment hash matches, and every roll checks out. This match was fair.</span>';
+    } else if (!result.commitmentValid) {
+      verdictEl.innerHTML = '<span class="fail">✗ The revealed serverSeed does NOT match the commitment hash. Do not trust this reveal.</span>';
+    } else {
+      verdictEl.innerHTML = '<span class="fail">✗ One or more rolls do not match what the formula produces. See table below.</span>';
+    }
+  });
+
+  document.getElementById('computeBtn').addEventListener('click', function () {
+    var out = document.getElementById('singleResult');
+    try {
+      var values = dice.deriveValues({
+        serverSeed: document.getElementById('serverSeed').value,
+        clientSeedHost: document.getElementById('clientSeedHost').value,
+        clientSeedGuest: document.getElementById('clientSeedGuest').value,
+        nonce: Number(document.getElementById('nonce').value),
+        count: Number(document.getElementById('count').value)
+      });
+      out.innerHTML = 'Dice values: <strong>' + values.join(', ') + '</strong>';
+    } catch (e) {
+      out.innerHTML = '<span class="fail">' + e.message + '</span>';
+    }
+  });
+})();
+</script>
+
+</body>
+</html>
