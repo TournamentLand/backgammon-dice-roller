@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Provably-fair, HMAC-based dice roll formula for online backgammon: commit a seed hash before play, reveal the seed after, let anyone independently verify every roll.",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "bin": {
     "backgammon-dice-verify": "bin/verify.js"
   },
